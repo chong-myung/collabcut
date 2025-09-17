@@ -13,6 +13,7 @@ import {
 } from '../models/project';
 import { UserModel } from '../models/user';
 import { DatabaseService } from './database.service';
+import { CloudApiService, CloudProject } from './cloud-api.service';
 import {
   DatabaseResult,
   ProjectRole,
@@ -41,6 +42,7 @@ export interface ProjectSearchOptions extends PaginationOptions {
   status?: ProjectStatus;
   search?: string;
   sortBy?: 'name' | 'created_at' | 'updated_at' | 'last_activity';
+  includeCloud?: boolean; // 클라우드 프로젝트 포함 여부
 }
 
 export interface ProjectActivity {
@@ -48,7 +50,7 @@ export interface ProjectActivity {
   project_id: string;
   user_id: string;
   action: string;
-  details: any;
+  details: Record<string, unknown>;
   created_at: Date;
 }
 
@@ -60,11 +62,16 @@ export class ProjectService {
   private projectModel: ProjectModel;
   private userModel: UserModel;
   private db: DatabaseService;
+  private cloudApiService: CloudApiService | null = null;
 
-  constructor(databaseService: DatabaseService) {
+  constructor(
+    databaseService: DatabaseService,
+    cloudApiService?: CloudApiService
+  ) {
     this.db = databaseService;
     this.projectModel = new ProjectModel(databaseService.getDatabase()!);
     this.userModel = new UserModel(databaseService.getDatabase()!);
+    this.cloudApiService = cloudApiService || null;
   }
 
   /**
@@ -165,7 +172,7 @@ export class ProjectService {
   }
 
   /**
-   * Get projects for a user
+   * Get projects for a user (local and cloud)
    * @param userId - User ID
    * @param options - Search and pagination options
    * @returns Promise with projects array or error
@@ -173,6 +180,55 @@ export class ProjectService {
   async getUserProjects(
     userId: string,
     options: ProjectSearchOptions = {}
+  ): Promise<DatabaseResult<ProjectWithRelations[]>> {
+    try {
+      const includeCloud = options.includeCloud !== false; // 기본적으로 클라우드 포함
+
+      // 로컬 프로젝트 조회
+      const localProjects = await this.getLocalUserProjects(userId, options);
+
+      // 클라우드 프로젝트 조회 (옵션이 활성화되어 있고 클라우드 서비스가 있는 경우)
+      let cloudProjects: CloudProject[] = [];
+      if (includeCloud && this.cloudApiService) {
+        const cloudResult = await this.cloudApiService.getUserProjects(userId, {
+          limit: options.limit,
+          offset: options.offset,
+          orderBy: options.orderBy,
+          orderDirection: options.orderDirection,
+          status: options.status,
+          search: options.search,
+        });
+
+        if (cloudResult.success && cloudResult.data) {
+          cloudProjects = cloudResult.data;
+        }
+      }
+
+      // 로컬과 클라우드 프로젝트 병합 및 중복 제거
+      const allProjects = this.mergeProjects(
+        localProjects.data || [],
+        cloudProjects
+      );
+
+      // 정렬 및 페이지네이션 적용
+      const sortedProjects = this.sortAndPaginateProjects(allProjects, options);
+
+      return { success: true, data: sortedProjects };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Get local projects for a user
+   * @private
+   */
+  private async getLocalUserProjects(
+    userId: string,
+    options: ProjectSearchOptions
   ): Promise<DatabaseResult<ProjectWithRelations[]>> {
     try {
       const limit = options.limit || 50;
@@ -191,7 +247,7 @@ export class ProjectService {
         LEFT JOIN users u ON p.created_by = u.id
         WHERE pm.user_id = ?
       `;
-      const params: any[] = [userId];
+      const params: unknown[] = [userId];
 
       // Add status filter
       if (options.status) {
@@ -215,30 +271,30 @@ export class ProjectService {
       const rows = await this.db.all(query, params);
 
       const projects: ProjectWithRelations[] = await Promise.all(
-        rows.map(async (row: any) => {
+        rows.map(async (row: Record<string, unknown>) => {
           const [memberCount, mediaCount, sequenceCount] = await Promise.all([
-            this.getProjectMemberCount(row.id),
-            this.getProjectMediaCount(row.id),
-            this.getProjectSequenceCount(row.id),
+            this.getProjectMemberCount(row.id as string),
+            this.getProjectMediaCount(row.id as string),
+            this.getProjectSequenceCount(row.id as string),
           ]);
 
           return {
-            id: row.id,
-            name: row.name,
-            description: row.description,
-            created_by: row.created_by,
-            settings: JSON.parse(row.settings || '{}'),
+            id: row.id as string,
+            name: row.name as string,
+            description: row.description as string,
+            created_by: row.created_by as string,
+            settings: JSON.parse((row.settings as string) || '{}'),
             status: row.status as ProjectStatus,
             cloud_sync_enabled: Boolean(row.cloud_sync_enabled),
             last_sync_at: row.last_sync_at
-              ? new Date(row.last_sync_at)
+              ? new Date(row.last_sync_at as string)
               : undefined,
-            created_at: new Date(row.created_at),
-            updated_at: new Date(row.updated_at),
+            created_at: new Date(row.created_at as string),
+            updated_at: new Date(row.updated_at as string),
             creator: {
-              id: row.created_by,
-              display_name: row.creator_name,
-              username: row.creator_username,
+              id: row.created_by as string,
+              display_name: row.creator_name as string,
+              username: row.creator_username as string,
             },
             member_count: memberCount.data || 0,
             media_count: mediaCount.data || 0,
@@ -254,6 +310,93 @@ export class ProjectService {
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
+  }
+
+  /**
+   * Merge local and cloud projects, removing duplicates
+   * @private
+   */
+  private mergeProjects(
+    localProjects: ProjectWithRelations[],
+    cloudProjects: CloudProject[]
+  ): ProjectWithRelations[] {
+    const projectMap = new Map<string, ProjectWithRelations>();
+
+    // 로컬 프로젝트 추가
+    localProjects.forEach((project) => {
+      projectMap.set(project.id, project);
+    });
+
+    // 클라우드 프로젝트 추가 (중복되지 않는 경우만)
+    cloudProjects.forEach((cloudProject) => {
+      if (!projectMap.has(cloudProject.id)) {
+        // 클라우드 프로젝트를 ProjectWithRelations 형식으로 변환
+        const convertedProject: ProjectWithRelations = {
+          id: cloudProject.id,
+          name: cloudProject.name,
+          description: cloudProject.description,
+          created_by: cloudProject.created_by,
+          settings: cloudProject.settings,
+          status: cloudProject.status,
+          cloud_sync_enabled: cloudProject.cloud_sync_enabled,
+          last_sync_at: cloudProject.last_sync_at,
+          created_at: cloudProject.created_at,
+          updated_at: cloudProject.updated_at,
+          creator: cloudProject.creator,
+          member_count: cloudProject.member_count,
+          media_count: cloudProject.media_count,
+          sequence_count: cloudProject.sequence_count,
+        };
+        projectMap.set(cloudProject.id, convertedProject);
+      }
+    });
+
+    return Array.from(projectMap.values());
+  }
+
+  /**
+   * Sort and paginate projects
+   * @private
+   */
+  private sortAndPaginateProjects(
+    projects: ProjectWithRelations[],
+    options: ProjectSearchOptions
+  ): ProjectWithRelations[] {
+    const orderBy = options.orderBy || 'updated_at';
+    const orderDirection = options.orderDirection || 'DESC';
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    // 정렬
+    projects.sort((a, b) => {
+      let aValue: string | number;
+      let bValue: string | number;
+
+      switch (orderBy) {
+        case 'name':
+          aValue = a.name.toLowerCase();
+          bValue = b.name.toLowerCase();
+          break;
+        case 'created_at':
+          aValue = a.created_at.getTime();
+          bValue = b.created_at.getTime();
+          break;
+        case 'updated_at':
+        default:
+          aValue = a.updated_at.getTime();
+          bValue = b.updated_at.getTime();
+          break;
+      }
+
+      if (orderDirection === 'ASC') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+
+    // 페이지네이션
+    return projects.slice(offset, offset + limit);
   }
 
   /**
@@ -440,17 +583,17 @@ export class ProjectService {
       );
 
       const membersWithUser: ProjectMemberWithUser[] = members.map(
-        (row: any) => ({
-          id: row.id,
-          project_id: row.project_id,
-          user_id: row.user_id,
+        (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          project_id: row.project_id as string,
+          user_id: row.user_id as string,
           role: row.role as ProjectRole,
-          joined_at: new Date(row.joined_at),
+          joined_at: new Date(row.joined_at as string),
           user: {
-            id: row.user_id,
-            username: row.username,
-            display_name: row.display_name,
-            avatar_url: row.avatar_url,
+            id: row.user_id as string,
+            username: row.username as string,
+            display_name: row.display_name as string,
+            avatar_url: row.avatar_url as string,
           },
         })
       );
@@ -529,7 +672,7 @@ export class ProjectService {
     projectId: string,
     userId: string,
     action: string,
-    details: any
+    details: Record<string, unknown>
   ): Promise<void> {
     try {
       const activityId = this.db.generateId('activity');

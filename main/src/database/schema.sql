@@ -47,10 +47,29 @@ CREATE TABLE IF NOT EXISTS project_memberships (
     FOREIGN KEY (invited_by) REFERENCES users(id)
 );
 
+-- Folders table for organizing media assets
+CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL CHECK(length(name) >= 1 AND length(name) <= 100),
+    parent_id TEXT,
+    path TEXT NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT NOT NULL,
+    permissions JSON DEFAULT '{}' CHECK(json_valid(permissions)),
+    color TEXT,
+    sort_order INTEGER DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
 -- Media assets table
 CREATE TABLE IF NOT EXISTS media_assets (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
+    folder_id TEXT,
     filename TEXT NOT NULL CHECK(length(filename) > 0),
     file_path TEXT NOT NULL,
     cloud_url TEXT,
@@ -64,8 +83,8 @@ CREATE TABLE IF NOT EXISTS media_assets (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     uploaded_by TEXT NOT NULL,
     metadata JSON DEFAULT '{}' CHECK(json_valid(metadata)),
-    folder_path TEXT DEFAULT '',
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
     FOREIGN KEY (uploaded_by) REFERENCES users(id)
 );
 
@@ -180,7 +199,14 @@ CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_project_memberships_project_user ON project_memberships(project_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_project_memberships_user_id ON project_memberships(user_id);
 
+CREATE INDEX IF NOT EXISTS idx_folders_project_id ON folders(project_id);
+CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id);
+CREATE INDEX IF NOT EXISTS idx_folders_path ON folders(path);
+CREATE INDEX IF NOT EXISTS idx_folders_created_by ON folders(created_by);
+CREATE INDEX IF NOT EXISTS idx_folders_sort_order ON folders(project_id, sort_order);
+
 CREATE INDEX IF NOT EXISTS idx_media_assets_project_id ON media_assets(project_id);
+CREATE INDEX IF NOT EXISTS idx_media_assets_folder_id ON media_assets(folder_id);
 CREATE INDEX IF NOT EXISTS idx_media_assets_created_at ON media_assets(created_at);
 CREATE INDEX IF NOT EXISTS idx_media_assets_file_type ON media_assets(file_type);
 CREATE INDEX IF NOT EXISTS idx_media_assets_uploaded_by ON media_assets(uploaded_by);
@@ -237,10 +263,56 @@ CREATE TRIGGER update_live_cursors_timestamp
 
 -- Initial data for development (only insert if not exists)
 INSERT OR IGNORE INTO users (id, username, email, display_name, status) VALUES
-    ('demo-user-1', 'demo_user', 'demo@example.com', 'Demo User', 'online');
+    ('demo-user-1', 'demo_user', 'demo@example.com', 'Demo User', 'online'),
+    ('demo-user-2', 'editor_user', 'editor@example.com', 'Editor User', 'online'),
+    ('demo-user-3', 'viewer_user', 'viewer@example.com', 'Viewer User', 'away');
 
 INSERT OR IGNORE INTO projects (id, name, description, created_by) VALUES
     ('demo-project-1', 'Demo Project', 'A sample video editing project', 'demo-user-1');
 
 INSERT OR IGNORE INTO project_memberships (id, project_id, user_id, role) VALUES
-    ('demo-membership-1', 'demo-project-1', 'demo-user-1', 'owner');
+    ('demo-membership-1', 'demo-project-1', 'demo-user-1', 'owner'),
+    -- ('demo-membership-2', 'demo-project-1', 'demo-user-2', 'editor'),
+    -- ('demo-membership-3', 'demo-project-1', 'demo-user-3', 'viewer');
+
+-- Test folders with hierarchical structure
+INSERT OR IGNORE INTO folders (id, project_id, name, parent_id, path, description, created_by, color, sort_order) VALUES
+    ('folder-1', 'demo-project-1', 'Raw Footage', NULL, '/Raw Footage', 'Original video files from cameras', 'demo-user-1', '#FF6B6B', 1),
+    ('folder-2', 'demo-project-1', 'Audio', NULL, '/Audio', 'Music and sound effects', 'demo-user-1', '#4ECDC4', 2),
+    ('folder-3', 'demo-project-1', 'Graphics', NULL, '/Graphics', 'Images, logos, and graphics', 'demo-user-1', '#45B7D1', 3),
+    ('folder-4', 'demo-project-1', 'Exports', NULL, '/Exports', 'Final rendered videos', 'demo-user-1', '#96CEB4', 4),
+    ('folder-5', 'demo-project-1', 'Interviews', 'folder-1', '/Raw Footage/Interviews', 'Interview recordings', 'demo-user-1', '#FFEAA7', 1),
+    ('folder-6', 'demo-project-1', 'B-Roll', 'folder-1', '/Raw Footage/B-Roll', 'B-roll footage', 'demo-user-1', '#DDA0DD', 2),
+    ('folder-7', 'demo-project-1', 'Background Music', 'folder-2', '/Audio/Background Music', 'Background music tracks', 'demo-user-1', '#98D8C8', 1),
+    ('folder-8', 'demo-project-1', 'Sound Effects', 'folder-2', '/Audio/Sound Effects', 'Sound effects library', 'demo-user-1', '#F7DC6F', 2);
+
+-- Test media assets in different folders
+INSERT OR IGNORE INTO media_assets (id, project_id, folder_id, filename, file_path, file_type, file_size, duration, resolution, framerate, codec, uploaded_by, metadata) VALUES
+    -- Raw Footage/Interviews
+    ('media-1', 'demo-project-1', 'folder-5', 'interview_ceo.mp4', '/media/interview_ceo.mp4', 'video', 104857600, 300.5, '1920x1080', 30.0, 'H.264', 'demo-user-1', '{"camera": "Canon EOS R5", "location": "Office"}'),
+    ('media-2', 'demo-project-1', 'folder-5', 'interview_engineer.mp4', '/media/interview_engineer.mp4', 'video', 98765432, 245.2, '1920x1080', 30.0, 'H.264', 'demo-user-2', '{"camera": "Sony A7III", "location": "Lab"}'),
+    
+    -- Raw Footage/B-Roll
+    ('media-3', 'demo-project-1', 'folder-6', 'office_timelapse.mp4', '/media/office_timelapse.mp4', 'video', 52428800, 60.0, '1920x1080', 24.0, 'H.264', 'demo-user-1', '{"camera": "iPhone 14 Pro", "type": "timelapse"}'),
+    ('media-4', 'demo-project-1', 'folder-6', 'product_demo.mp4', '/media/product_demo.mp4', 'video', 157286400, 180.8, '1920x1080', 60.0, 'H.264', 'demo-user-2', '{"camera": "Canon EOS R5", "type": "demo"}'),
+    ('media-5', 'demo-project-1', 'folder-6', 'team_working.jpg', '/media/team_working.jpg', 'image', 5242880, NULL, '1920x1080', NULL, 'JPEG', 'demo-user-1', '{"camera": "Canon EOS R5", "type": "still"}'),
+    
+    -- Audio/Background Music
+    ('media-6', 'demo-project-1', 'folder-7', 'corporate_theme.mp3', '/media/corporate_theme.mp3', 'audio', 8388608, 120.0, NULL, NULL, 'MP3', 'demo-user-1', '{"genre": "corporate", "bpm": 120}'),
+    ('media-7', 'demo-project-1', 'folder-7', 'upbeat_intro.mp3', '/media/upbeat_intro.mp3', 'audio', 6291456, 45.5, NULL, NULL, 'MP3', 'demo-user-2', '{"genre": "electronic", "bpm": 128}'),
+    
+    -- Audio/Sound Effects
+    ('media-8', 'demo-project-1', 'folder-8', 'notification.wav', '/media/notification.wav', 'audio', 1048576, 2.5, NULL, NULL, 'WAV', 'demo-user-1', '{"type": "notification", "volume": 0.8}'),
+    ('media-9', 'demo-project-1', 'folder-8', 'transition_swish.wav', '/media/transition_swish.wav', 'audio', 2097152, 1.2, NULL, NULL, 'WAV', 'demo-user-2', '{"type": "transition", "volume": 0.6}'),
+    
+    -- Graphics
+    ('media-10', 'demo-project-1', 'folder-3', 'company_logo.png', '/media/company_logo.png', 'image', 2097152, NULL, '512x512', NULL, 'PNG', 'demo-user-1', '{"type": "logo", "transparent": true}'),
+    ('media-11', 'demo-project-1', 'folder-3', 'product_screenshot.png', '/media/product_screenshot.png', 'image', 4194304, NULL, '1920x1080', NULL, 'PNG', 'demo-user-2', '{"type": "screenshot", "product": "main_app"}'),
+    ('media-12', 'demo-project-1', 'folder-3', 'infographic.svg', '/media/infographic.svg', 'image', 1048576, NULL, '1920x1080', NULL, 'SVG', 'demo-user-1', '{"type": "infographic", "vector": true}'),
+    
+    -- Exports
+    ('media-13', 'demo-project-1', 'folder-4', 'final_video_1080p.mp4', '/exports/final_video_1080p.mp4', 'video', 314572800, 420.0, '1920x1080', 30.0, 'H.264', 'demo-user-1', '{"quality": "1080p", "final": true}'),
+    ('media-14', 'demo-project-1', 'folder-4', 'final_video_4k.mp4', '/exports/final_video_4k.mp4', 'video', 1258291200, 420.0, '3840x2160', 30.0, 'H.264', 'demo-user-1', '{"quality": "4K", "final": true}'),
+    
+    -- Media without folder (root level)
+    ('media-15', 'demo-project-1', NULL, 'temp_audio.wav', '/media/temp_audio.wav', 'audio', 5242880, 30.0, NULL, NULL, 'WAV', 'demo-user-2', '{"type": "temp", "status": "processing"}');

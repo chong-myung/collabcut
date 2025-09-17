@@ -42,27 +42,51 @@ if (!isMainThread) {
 
       switch (job.type) {
         case 'process':
-          result = await ffmpegService.processVideo(job.inputPath, job.outputPath, job.options);
+          result = await ffmpegService.processVideo(
+            job.inputPath,
+            job.outputPath,
+            job.options
+          );
           break;
         case 'thumbnail':
-          result = await ffmpegService.extractThumbnail(job.inputPath, job.outputPath, job.options.startTime);
+          result = await ffmpegService.extractThumbnail(
+            job.inputPath,
+            job.outputPath,
+            job.options.startTime
+          );
           break;
         case 'info':
           result = await ffmpegService.getVideoInfo(job.inputPath);
           break;
         case 'trim':
           if (job.options.startTime && job.options.duration) {
-            result = await ffmpegService.trimVideo(job.inputPath, job.outputPath, job.options.startTime, job.options.duration);
+            result = await ffmpegService.trimVideo(
+              job.inputPath,
+              job.outputPath,
+              job.options.startTime,
+              job.options.duration
+            );
           }
           break;
         case 'resize':
           if (job.options.resolution) {
-            const [width, height] = job.options.resolution.split('x').map(Number);
-            result = await ffmpegService.resizeVideo(job.inputPath, job.outputPath, width, height);
+            const [width, height] = job.options.resolution
+              .split('x')
+              .map(Number);
+            result = await ffmpegService.resizeVideo(
+              job.inputPath,
+              job.outputPath,
+              width,
+              height
+            );
           }
           break;
         case 'convert':
-          result = await ffmpegService.convertFormat(job.inputPath, job.outputPath, job.options.format || 'mp4');
+          result = await ffmpegService.convertFormat(
+            job.inputPath,
+            job.outputPath,
+            job.options.format || 'mp4'
+          );
           break;
         default:
           throw new Error(`Unknown job type: ${job.type}`);
@@ -70,12 +94,12 @@ if (!isMainThread) {
 
       parentPort?.postMessage({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       parentPort?.postMessage({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
   }
@@ -92,7 +116,10 @@ export class VideoProcessingManager {
   private jobQueue: VideoProcessingJob[] = [];
   private activeJobs: Map<string, VideoProcessingJob> = new Map();
   private maxConcurrentJobs: number = 2;
-  private progressCallbacks: Map<string, (progress: VideoProcessingProgress) => void> = new Map();
+  private progressCallbacks: Map<
+    string,
+    (progress: VideoProcessingProgress) => void
+  > = new Map();
 
   /**
    * Add a video processing job to the queue
@@ -109,7 +136,7 @@ export class VideoProcessingManager {
     this.emitProgress({
       jobId: job.id,
       progress: 0,
-      status: 'queued'
+      status: 'queued',
     });
 
     // Process queue
@@ -119,7 +146,10 @@ export class VideoProcessingManager {
   /**
    * Set progress callback for a job
    */
-  setProgressCallback(jobId: string, callback: (progress: VideoProcessingProgress) => void): void {
+  setProgressCallback(
+    jobId: string,
+    callback: (progress: VideoProcessingProgress) => void
+  ): void {
     this.progressCallbacks.set(jobId, callback);
   }
 
@@ -135,14 +165,14 @@ export class VideoProcessingManager {
    */
   async cancelJob(jobId: string): Promise<boolean> {
     // Remove from queue if not started
-    const queueIndex = this.jobQueue.findIndex(job => job.id === jobId);
+    const queueIndex = this.jobQueue.findIndex((job) => job.id === jobId);
     if (queueIndex >= 0) {
       this.jobQueue.splice(queueIndex, 1);
       this.emitProgress({
         jobId,
         progress: 0,
         status: 'failed',
-        message: 'Job cancelled'
+        message: 'Job cancelled',
       });
       return true;
     }
@@ -157,7 +187,7 @@ export class VideoProcessingManager {
         jobId,
         progress: 0,
         status: 'failed',
-        message: 'Job cancelled'
+        message: 'Job cancelled',
       });
       return true;
     }
@@ -176,7 +206,7 @@ export class VideoProcessingManager {
     return {
       queued: this.jobQueue.length,
       active: this.activeJobs.size,
-      totalJobs: this.jobQueue.length + this.activeJobs.size
+      totalJobs: this.jobQueue.length + this.activeJobs.size,
     };
   }
 
@@ -184,7 +214,10 @@ export class VideoProcessingManager {
    * Process the job queue
    */
   private async processQueue(): Promise<void> {
-    while (this.jobQueue.length > 0 && this.activeJobs.size < this.maxConcurrentJobs) {
+    while (
+      this.jobQueue.length > 0 &&
+      this.activeJobs.size < this.maxConcurrentJobs
+    ) {
       const job = this.jobQueue.shift();
       if (!job) continue;
 
@@ -202,11 +235,11 @@ export class VideoProcessingManager {
       this.emitProgress({
         jobId: job.id,
         progress: 0,
-        status: 'processing'
+        status: 'processing',
       });
 
       const worker = new Worker(__filename, {
-        workerData: job
+        workerData: job,
       });
 
       this.workers.set(job.id, worker);
@@ -218,7 +251,7 @@ export class VideoProcessingManager {
       worker.on('error', (error) => {
         this.handleJobComplete(job.id, {
           success: false,
-          error: error.message
+          error: error.message,
         });
       });
 
@@ -226,15 +259,14 @@ export class VideoProcessingManager {
         if (code !== 0) {
           this.handleJobComplete(job.id, {
             success: false,
-            error: `Worker stopped with exit code ${code}`
+            error: `Worker stopped with exit code ${code}`,
           });
         }
       });
-
     } catch (error) {
       this.handleJobComplete(job.id, {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to start job'
+        error: error instanceof Error ? error.message : 'Failed to start job',
       });
     }
   }
@@ -242,7 +274,10 @@ export class VideoProcessingManager {
   /**
    * Handle job completion
    */
-  private async handleJobComplete(jobId: string, result: VideoProcessingResult): Promise<void> {
+  private async handleJobComplete(
+    jobId: string,
+    result: VideoProcessingResult
+  ): Promise<void> {
     const worker = this.workers.get(jobId);
     if (worker) {
       await worker.terminate();
@@ -255,7 +290,7 @@ export class VideoProcessingManager {
       jobId,
       progress: 100,
       status: result.success ? 'completed' : 'failed',
-      message: result.error
+      message: result.error,
     });
 
     // Process next job in queue

@@ -11,12 +11,14 @@ import { MediaService } from './services/media.service';
 import { TimelineService } from './services/timeline.service';
 import { CollaborationService } from './services/collaboration.service';
 import { UserModel, UserAuth } from './models/user';
-import videoProcessingManager, { VideoProcessingJob } from './workers/video-processor';
+import videoProcessingManager, {
+  VideoProcessingJob,
+} from './workers/video-processor';
 import { ActivityType } from '../../shared/types/database';
 
 // Initialize services
 const projectService = new ProjectService(databaseService);
-const mediaService = new MediaService(databaseService);
+const mediaService = new MediaService();
 const timelineService = new TimelineService(databaseService);
 const collaborationService = new CollaborationService(databaseService);
 
@@ -270,7 +272,7 @@ class CollabCutApp {
             return { success: false, error: 'User not authenticated' };
           }
           const project = await projectService.getProject(projectId, userId);
-          if(!project.success) {
+          if (!project.success) {
             return { success: false, error: project.error };
           }
           return { success: true, data: project.data };
@@ -288,7 +290,7 @@ class CollabCutApp {
         }
 
         const projects = await projectService.getUserProjects(userId);
-        if(!projects.success) {
+        if (!projects.success) {
           return { success: false, error: projects.error };
         }
         return { success: true, data: projects.data };
@@ -333,7 +335,10 @@ class CollabCutApp {
             return { success: false, error: 'User not authenticated' };
           }
 
-          const assetsResult = await mediaService.getProjectMedia(projectId, {});
+          const assetsResult = await mediaService.getProjectMedia(
+            projectId,
+            {}
+          );
           return assetsResult;
         } catch (error: any) {
           return { success: false, error: error.message };
@@ -375,7 +380,7 @@ class CollabCutApp {
             outputPath,
             options,
             type: 'process',
-            priority: options.priority || 'normal'
+            priority: options.priority || 'normal',
           };
 
           await videoProcessingManager.addJob(job);
@@ -402,7 +407,7 @@ class CollabCutApp {
             outputPath,
             options: { startTime: timeOffset },
             type: 'thumbnail',
-            priority: 'high'
+            priority: 'high',
           };
 
           await videoProcessingManager.addJob(job);
@@ -423,7 +428,7 @@ class CollabCutApp {
             outputPath: '', // Not needed for info extraction
             options: {},
             type: 'info',
-            priority: 'high'
+            priority: 'high',
           };
 
           await videoProcessingManager.addJob(job);
@@ -462,17 +467,14 @@ class CollabCutApp {
       }
     );
 
-    ipcMain.handle(
-      'video:queue:status',
-      async (): Promise<IpcResponse> => {
-        try {
-          const status = videoProcessingManager.getQueueStatus();
-          return { success: true, data: status };
-        } catch (error: any) {
-          return { success: false, error: error.message };
-        }
+    ipcMain.handle('video:queue:status', async (): Promise<IpcResponse> => {
+      try {
+        const status = videoProcessingManager.getQueueStatus();
+        return { success: true, data: status };
+      } catch (error: any) {
+        return { success: false, error: error.message };
       }
-    );
+    });
 
     // Timeline management
     ipcMain.handle(
@@ -486,7 +488,7 @@ class CollabCutApp {
 
           const result = await timelineService.createSequence({
             ...sequenceData,
-            created_by: userId
+            created_by: userId,
           });
           return result;
         } catch (error: any) {
@@ -504,7 +506,8 @@ class CollabCutApp {
             return { success: false, error: 'User not authenticated' };
           }
 
-          const result = await timelineService.getSequenceWithTracks(sequenceId);
+          const result =
+            await timelineService.getSequenceWithTracks(sequenceId);
           return result;
         } catch (error: any) {
           return { success: false, error: error.message };
@@ -523,7 +526,7 @@ class CollabCutApp {
 
           const result = await timelineService.addClip({
             ...clipData,
-            created_by: userId
+            created_by: userId,
           });
           return result;
         } catch (error: any) {
@@ -535,7 +538,11 @@ class CollabCutApp {
     // Collaboration
     ipcMain.handle(
       'collaboration:join',
-      async (event, projectId: string, sequenceId: string): Promise<IpcResponse> => {
+      async (
+        event,
+        projectId: string,
+        sequenceId: string
+      ): Promise<IpcResponse> => {
         try {
           const userId = this.getCurrentUserId();
           if (!userId) {
@@ -558,14 +565,21 @@ class CollabCutApp {
 
     ipcMain.handle(
       'collaboration:leave',
-      async (event, projectId: string, sequenceId: string): Promise<IpcResponse> => {
+      async (
+        event,
+        projectId: string,
+        sequenceId: string
+      ): Promise<IpcResponse> => {
         try {
           const userId = this.getCurrentUserId();
           if (!userId) {
             return { success: false, error: 'User not authenticated' };
           }
 
-          const result = await collaborationService.deactivateCursors(userId, projectId);
+          const result = await collaborationService.deactivateCursors(
+            userId,
+            projectId
+          );
           return result;
         } catch (error: any) {
           return { success: false, error: error.message };
@@ -584,7 +598,7 @@ class CollabCutApp {
 
           const result = await collaborationService.addComment({
             ...commentData,
-            author_id: userId
+            author_id: userId,
           });
           return result;
         } catch (error: any) {
@@ -747,7 +761,7 @@ class CollabCutApp {
       console.warn('WebSocket server not initialized');
       return;
     }
-    
+
     this.wsServer.clients.forEach((client) => {
       if (client !== excludeClient && client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify(message));

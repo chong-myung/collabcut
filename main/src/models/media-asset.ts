@@ -389,7 +389,7 @@ export class MediaAssetModel implements ModelValidator<MediaAsset> {
     projectId: string,
     options: PaginationOptions & {
       fileType?: MediaFileType;
-      folderPath?: string;
+      folderId?: string;
     } = {}
   ): Promise<DatabaseResult<MediaAsset[]>> {
     try {
@@ -398,32 +398,89 @@ export class MediaAssetModel implements ModelValidator<MediaAsset> {
       const orderBy = options.orderBy || 'created_at';
       const orderDirection = options.orderDirection || 'DESC';
 
-      let query = 'SELECT * FROM media_assets WHERE project_id = ?';
-      const params: any[] = [projectId];
+      let mediaQuery =
+        'SELECT * FROM media_assets WHERE project_id = ? AND folder_id IS NULL';
+      let folderQuery =
+        'SELECT * FROM folders WHERE project_id = ? AND parent_id IS NULL';
+      const mediaParams: any[] = [projectId];
+      const folderParams: any[] = [projectId];
 
       // Add file type filter
       if (options.fileType) {
-        query += ' AND file_type = ?';
-        params.push(options.fileType);
+        mediaQuery += ' AND file_type = ?';
+        mediaParams.push(options.fileType);
       }
 
       // Add folder path filter
-      if (options.folderPath !== undefined) {
-        query += ' AND folder_path = ?';
-        params.push(options.folderPath);
+      if (options.folderId !== undefined) {
+        mediaQuery += ' AND folder_id = ?';
+        mediaParams.push(options.folderId);
       }
-
-      query += ` ORDER BY ${orderBy} ${orderDirection} LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
-
+      console.log(this.db);
+      // Execute both queries in parallel
       return new Promise((resolve) => {
-        this.db.all(query, params, (err, rows: any[]) => {
-          if (err) {
-            resolve({ success: false, error: err.message });
-          } else {
-            const assets = rows.map((row) => this.mapRowToMediaAsset(row));
-            resolve({ success: true, data: assets });
+        let mediaResults: any[] = [];
+        let folderResults: any[] = [];
+        let completedQueries = 0;
+        let hasError = false;
+
+        const checkCompletion = () => {
+          if (hasError) return;
+
+          completedQueries++;
+          if (completedQueries === 2) {
+            // Combine and sort results
+            const allAssets = [
+              ...mediaResults.map((row) => this.mapRowToMediaAsset(row)),
+              ...folderResults.map((row) => this.mapRowToFolder(row)),
+            ];
+
+            // Sort combined results
+            allAssets.sort((a, b) => {
+              const aValue = a[orderBy as keyof MediaAsset];
+              const bValue = b[orderBy as keyof MediaAsset];
+
+              // Handle undefined values
+              if (aValue === undefined && bValue === undefined) return 0;
+              if (aValue === undefined)
+                return orderDirection === 'ASC' ? 1 : -1;
+              if (bValue === undefined)
+                return orderDirection === 'ASC' ? -1 : 1;
+
+              if (orderDirection === 'ASC') {
+                return aValue > bValue ? 1 : -1;
+              } else {
+                return aValue < bValue ? 1 : -1;
+              }
+            });
+
+            // Apply pagination
+            const paginatedAssets = allAssets.slice(offset, offset + limit);
+
+            resolve({ success: true, data: paginatedAssets });
           }
+        };
+        console.log(this.db);
+        // Execute media query
+        this.db.all(mediaQuery, mediaParams, (err, rows: any[]) => {
+          if (err) {
+            hasError = true;
+            resolve({ success: false, error: err.message });
+            return;
+          }
+          mediaResults = rows;
+          checkCompletion();
+        });
+
+        // Execute folder query
+        this.db.all(folderQuery, folderParams, (err, rows: any[]) => {
+          if (err) {
+            hasError = true;
+            resolve({ success: false, error: err.message });
+            return;
+          }
+          folderResults = rows;
+          checkCompletion();
         });
       });
     } catch (error) {
@@ -701,6 +758,37 @@ export class MediaAssetModel implements ModelValidator<MediaAsset> {
       uploaded_by: row.uploaded_by,
       metadata: JSON.parse(row.metadata || '{}'),
       folder_path: row.folder_path || '',
+      created_at: new Date(row.created_at),
+    };
+  }
+
+  /**
+   * Map folder row to MediaAsset object
+   * @param row - Database row from folders table
+   * @returns MediaAsset object representing a folder
+   */
+  private mapRowToFolder(row: any): MediaAsset {
+    return {
+      id: row.id,
+      project_id: row.project_id,
+      filename: row.name, // Use folder name as filename
+      file_path: row.path,
+      cloud_url: undefined,
+      file_type: 'folder' as any, // Cast to any since folder is not in MediaFileType enum
+      file_size: 0, // Folders have no file size
+      duration: undefined,
+      resolution: undefined,
+      framerate: undefined,
+      codec: undefined,
+      thumbnail_url: undefined,
+      uploaded_by: row.created_by,
+      metadata: {
+        description: row.description,
+        color: row.color,
+        sort_order: row.sort_order,
+        permissions: JSON.parse(row.permissions || '{}'),
+      },
+      folder_path: row.path,
       created_at: new Date(row.created_at),
     };
   }

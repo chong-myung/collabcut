@@ -12,7 +12,7 @@ import {
   MediaMetadata,
   FileValidationResult,
 } from '../models/media-asset';
-import { DatabaseService, databaseService } from './database.service';
+import { databaseService } from './database.service';
 import {
   DatabaseResult,
   MediaFileType,
@@ -63,12 +63,11 @@ export interface FFmpegInfo {
  */
 export class MediaService {
   private mediaModel: MediaAssetModel;
-  private db: DatabaseService;
   private ffmpegPath: string | null = null;
   private ffprobePath: string | null = null;
 
-  constructor(databaseService: DatabaseService) {
-    this.db = databaseService;
+  constructor() {
+    console.log(databaseService.getDatabase());
     this.mediaModel = new MediaAssetModel(databaseService.getDatabase()!);
     this.initializeFFmpeg();
   }

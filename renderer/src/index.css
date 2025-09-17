@@ -1,3 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --color-discord-bg-primary: #36393f;
+  --color-discord-bg-secondary: #2f3136;
+  --color-discord-bg-tertiary: #202225;
+  --color-discord-bg-accent: #40444b;
+  --color-discord-bg-accent-hover: #4f545c;
+  --color-discord-bg-accent-active: #5d6269;
+  --color-discord-text-primary: #ffffff;
+  --color-discord-text-secondary: #dcddde;
+  --color-discord-text-muted: #b9bbbe;
+  --color-discord-text-disabled: #8e9297;
+  --color-discord-text-faint: #72767d;
+  --color-discord-brand: #5865f2;
+  --color-discord-brand-hover: #4752c4;
+  --color-discord-border: #40444b;
+  --color-discord-border-faint: #202225;
+  --color-discord-success: #57f287;
+  --color-discord-warning: #fee75c;
+  --color-discord-danger: #ed4245;
+  --color-discord-danger-hover: #c73e41;
+  
+  --font-family-discord: Whitney, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
 body {
   margin: 0;
   font-family:
@@ -5,8 +31,8 @@ body {
     'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #1a1a1a;
-  color: #ffffff;
+  background-color: #36393f;
+  color: #dcddde;
 }
 
 code {

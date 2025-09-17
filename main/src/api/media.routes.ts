@@ -14,7 +14,7 @@ import { databaseService } from '../services/database.service';
 import { MediaFileType } from '../../../shared/types/database';
 
 // Initialize services
-const mediaService = new MediaService(databaseService);
+const mediaService = new MediaService();
 const projectService = new ProjectService(databaseService);
 
 const router = Router();

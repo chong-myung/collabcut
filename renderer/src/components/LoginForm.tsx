@@ -1,11 +1,22 @@
 import React, { useState } from 'react';
 
-const LoginForm = ({ onLogin }) => {
+interface User {
+  user: {
+    display_name?: string;
+    username: string;
+  };
+}
+
+interface LoginFormProps {
+  onLogin: (user: User) => void;
+}
+
+const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId.trim()) {
       setError('Please enter a user ID');
@@ -17,7 +28,7 @@ const LoginForm = ({ onLogin }) => {
 
     try {
       const result = await window.electronAPI.login(userId.trim());
-      if (result.success) {
+      if (result.success && result.data) {
         onLogin(result.data);
       } else {
         setError(result.error || 'Login failed');
